@@ -47,11 +47,12 @@ class PortScanner:
 
 
 class ScannerForm:
-    def __init__(self, parent: tk.Tk):
+    def __init__(self, ip: str, parent: tk.Tk = None):
+        self._ip = ip
         self._parent = parent
 
     def show(self):
-        self._frame = tk.Frame(root)
+        self._frame = tk.Frame(self._parent)
         self._frame.pack(pady=10)
 
         tk.Label(self._frame, text="Начальный порт:").grid(row=0, column=0)
@@ -62,12 +63,13 @@ class ScannerForm:
         self._end_port_entry = tk.Entry(self._frame)
         self._end_port_entry.grid(row=1, column=1)
 
-        self._result_text = scrolledtext.ScrolledText(root, width=50, height=10)
+        self._result_text = scrolledtext.ScrolledText(self._parent, width=50, height=10)
         self._result_text.pack(padx=10, pady=10)
 
         def button_callback():
+            # "10.0.0.53"
             scanner = PortScanner(
-                "10.0.0.53",
+                self._ip,
                 int(self._start_port_entry.get()),
                 int(self._end_port_entry.get()),
                 self._result_text,
@@ -75,7 +77,7 @@ class ScannerForm:
             scanner.start_scan()
 
         self._scan_button = tk.Button(
-            root, text="Сканировать порты", command=button_callback
+            self._parent, text="Сканировать порты", command=button_callback
         )
         self._scan_button.pack(pady=10)
 
