@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import cv2
 import threading
 from scapy.all import ARP, Ether, srp, conf
@@ -10,8 +11,17 @@ conf.use_pcap = True
 
 NETWORK_RANGE = "10.0.0.1/24"
 
+
+@dataclass
+class ClickArea:
+    location: list[tuple]
+    mac: str
+
+
+# Словарь с настройками для разных программ
 PROGRAMS = {
     "3303": {
+        "CLICK_AREA": [ClickArea([(347, 94), (399, 128)], "D8:43:AE:C9:3B:4E")],
         "IMAGE_PATH": "network_scheme.png",
         "DEFAULT_IPS": {
             "D8:43:AE:C5:04:53": "0.0.0.50",
@@ -43,18 +53,114 @@ PROGRAMS = {
             "D8:43:AE:C9:3D:5C": (374, 360),
             "D8:43:AE:C9:3C:98": (473, 360),
         },
-        "CLICK_AREA": [(347, 94), (399, 128)],
-    }
+    },
+    "3307": {
+        "IMAGE_PATH": "network_scheme3307.png",
+        "DEFAULT_IPS": {
+            "D8:43:AE:C9:3A:BD": "10.0.0.30",
+            "D8:43:AE:C5:04:91": "10.0.0.31",
+            "D8:43:AE:C9:3B:53": "10.0.0.32",
+            "D8:43:AE:C9:3B:06": "10.0.0.33",
+            "D8:43:AE:C9:3B:2C": "10.0.0.34",
+            "D8:43:AE:C9:3B:56": "10.0.0.35",
+            "D8:43:AE:C9:3B:43": "10.0.0.36",
+            "D8:43:AE:C5:04:9C": "10.0.0.37",
+            "D8:43:AE:C5:04:B2": "10.0.0.38",
+            "D8:43:AE:C9:3B:73": "10.0.0.39",
+            "D8:43:AE:C9:3B:5E": "10.0.0.40",
+            "D8:43:AE:C9:3B:46": "10.0.0.41",
+            "D8:43:AE:C5:04:96": "10.0.0.42",
+        },
+        "DEVICES": {
+            "D8:43:AE:C9:3A:BD": (60, 46),
+            "D8:43:AE:C5:04:91": (165, 110),
+            "D8:43:AE:C9:3B:53": (268, 110),
+            "D8:43:AE:C9:3B:06": (370, 110),
+            "D8:43:AE:C9:3B:2C": (470, 110),
+            "D8:43:AE:C9:3B:56": (172, 231),
+            "D8:43:AE:C9:3B:43": (275, 229),
+            "D8:43:AE:C5:04:9C": (374, 230),
+            "D8:43:AE:C5:04:B2": (473, 228),
+            "D8:43:AE:C9:3B:73": (172, 360),
+            "D8:43:AE:C9:3B:5E": (275, 360),
+            "D8:43:AE:C9:3B:46": (374, 360),
+            "D8:43:AE:C5:04:96": (473, 360),
+        },
+    },
 }
 
 
-class ArpScanner:
+class NetworkForm:
+    def __init__(self, found, program, root=None):
+        self._root = root
+        self._found = found
+        self._program = program
+
+    def _on_mouse_click(self, event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            for area in self._program["CLICK_AREA"]:
+                (x1, y1), (x2, y2) = area.location
+                if x1 <= x <= x2 and y1 <= y <= y2 and area.mac in self._found:
+                    scanner_form = ScannerForm(self._found[area.mac], self._root)
+                    scanner_form.show()
+                    break
+
+    def show(self, devices, default_ips, image_path):
+        """Открывает изображение и накладывает круги с IP-адресами."""
+        image = cv2.imread(image_path)
+        if image is None:
+            print("Ошибка: изображение не найдено")
+            return
+
+        circle_radius = 10  # Увеличенный радиус круга
+        colors = {
+            "red": (0, 0, 255),  # Устройство не в сети
+            "green": (0, 255, 0),  # IP совпадает с заданным
+            "yellow": (0, 255, 255),  # IP отличается от заданного
+        }
+
+        frame = image.copy()
+        for mac, (x, y) in devices.items():
+            if mac in self._found:
+                ip_address = self._found[mac]
+                default_ip = default_ips.get(mac, "")
+                if ip_address == default_ip:
+                    color = colors["green"]
+                else:
+                    color = colors["yellow"]
+            else:
+                color = colors["red"]
+
+            cv2.circle(frame, (x, y), circle_radius, color, -1)
+
+            if mac in self._found:
+                text_position = (x - 20, y - 22)  # Подняли текст выше на 7
+                cv2.putText(
+                    frame,
+                    self._found[mac],
+                    text_position,
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.4,
+                    (0, 0, 0),
+                    1,
+                    cv2.LINE_AA,
+                )
+
+        cv2.imshow("Network Map", frame)
+        cv2.setMouseCallback("Network Map", self._on_mouse_click)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+
+class Scanner:
     @staticmethod
-    def scan(ip_range, devices):
+    def _arp_scan(ip_range, devices):
+        """Выполняет ARP-сканирование сети и ищет MAC-адреса."""
         arp_request = ARP(pdst=ip_range)
         ether = Ether(dst="ff:ff:ff:ff:ff:ff")
         packet = ether / arp_request
         result = srp(packet, timeout=2, verbose=False)[0]
+
         found_devices = {}
         for _, received in result:
             ip = received.psrc
@@ -63,78 +169,58 @@ class ArpScanner:
                 found_devices[mac] = ip
         return found_devices
 
+    @classmethod
+    def scan(cls, program):
+        found_devices = cls._arp_scan(NETWORK_RANGE, program["DEVICES"])
+        return found_devices
 
-class AuditoriumScannerForm:
-    def on_mouse_click(self, event, x, y, flags, param):
-        if event == cv2.EVENT_LBUTTONDOWN:
-            program = PROGRAMS["3303"]
-            (x1, y1), (x2, y2) = program["CLICK_AREA"]
-            if x1 <= x <= x2 and y1 <= y <= y2:
-                scanner_form = ScannerForm("0.0.0.0")
-                scanner_form.show()
 
-    def show_image_with_circles(self, found_devices, devices, default_ips, image_path):
-        image = cv2.imread(image_path)
-        if image is None:
-            print("Ошибка: изображение не найдено")
-            return
-        cv2.namedWindow("Network Map")
-        cv2.setMouseCallback("Network Map", self.on_mouse_click)
-        circle_radius = 10
-        colors = {"red": (0, 0, 255), "green": (0, 255, 0), "yellow": (0, 255, 255)}
-        frame = image.copy()
-        for mac, (x, y) in devices.items():
-            color = colors["red"]
-            if mac in found_devices:
-                ip_address = found_devices[mac]
-                default_ip = default_ips.get(mac, "")
-                color = (
-                    colors["green"] if ip_address == default_ip else colors["yellow"]
-                )
-            cv2.circle(frame, (x, y), circle_radius, color, -1)
-            if mac in found_devices:
-                cv2.putText(
-                    frame,
-                    found_devices[mac],
-                    (x - 20, y - 22),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.4,
-                    (0, 0, 0),
-                    1,
-                    cv2.LINE_AA,
-                )
-        while True:
-            cv2.imshow("Network Map", frame)
-            if cv2.waitKey(1) & 0xFF == 27:
-                break
-        cv2.destroyAllWindows()
+class SelectForm:
+    def __init__(self, root=None):
+        self._root = root
 
     def show(self):
-        root = tk.Tk()
-        root.title("Выберите программу")
-        tk.Button(
-            root,
+        """Создает графический интерфейс с кнопками."""
+        self._root.title("Выберите программу")
+
+        self._button_3303 = tk.Button(
+            self._root,
             text="3303",
             command=lambda: threading.Thread(
-                target=self.start_scan, args=("3303",)
+                target=self.on_button_click, args=("3303",)
             ).start(),
-        ).pack(padx=20, pady=10)
-        root.mainloop()
+        )
+        self._button_3303.pack(padx=20, pady=10)
 
-    def start_scan(self, program_key):
+        self._button_3307 = tk.Button(
+            self._root,
+            text="3307",
+            command=lambda: threading.Thread(
+                target=self.on_button_click, args=("3307",)
+            ).start(),
+        )
+        self._button_3307.pack(padx=20, pady=10)
+
+    def close(self):
+        self._button_3303.destroy()
+        self._button_3307.destroy()
+
+    def on_button_click(self, program_key):
+        """Обработчик клика по кнопке."""
         program = PROGRAMS[program_key]
-        found_devices = ArpScanner.scan(NETWORK_RANGE, program["DEVICES"])
-        self.show_image_with_circles(
-            found_devices,
-            program["DEVICES"],
-            program["DEFAULT_IPS"],
-            program["IMAGE_PATH"],
+        found = Scanner.scan(program)
+        self.close()
+        network_form = NetworkForm(found, program, self._root)
+        network_form.show(
+            program["DEVICES"], program["DEFAULT_IPS"], program["IMAGE_PATH"]
         )
 
 
 def main():
-    form = AuditoriumScannerForm()
-    form.show()
+    root = tk.Tk()
+    select_form = SelectForm(root)
+    select_form.show()
+    root.mainloop()
 
 
 if __name__ == "__main__":

@@ -80,13 +80,3 @@ class ScannerForm:
             self._parent, text="Сканировать порты", command=button_callback
         )
         self._scan_button.pack(pady=10)
-
-
-if __name__ == "__main__":
-    # Создание GUI
-    root = tk.Tk()
-    root.title("Сканер портов")
-
-    ScannerForm(root).show()
-
-    root.mainloop()
